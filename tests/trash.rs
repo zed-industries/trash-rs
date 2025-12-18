@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use log::trace;
 
 use serial_test::serial;
-use trash::{delete, delete_all};
+use trash::{delete, delete_all, delete_with_info};
 
 mod util {
     use std::sync::atomic::{AtomicI32, Ordering};
@@ -25,6 +25,25 @@ mod util {
     }
 }
 pub use util::{get_unique_name, init_logging};
+
+#[test]
+#[serial]
+fn test_delete_file_and_restore() {
+    init_logging();
+    trace!("Started test_delete_and_restore");
+
+    let path = PathBuf::from("test_file_to_delete");
+
+    File::create_new(path).unwrap();
+    assert!(path.exists());
+    let info = delete_with_info(path).unwrap().unwrap();
+    assert!(!path.exists());
+    restore_all([info]);
+    assert!(path.exists());
+    std::fs::remove_file(path).unwrap();
+
+    trace!("Finished test_delete_and_restore")
+}
 
 #[test]
 #[serial]

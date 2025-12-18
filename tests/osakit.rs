@@ -36,8 +36,7 @@ mod test_main_thread_mac {
     #[serial]
     pub fn test_main_thread_delete_with_finder_osakit_with_info() {
         // OSAkit must be run on the main thread
-        if let Some("main") = thread::current().name() {
-        } else {
+        if thread::current().name() != Some("main") {
             panic!("OSAkit is NOT thread-safe, so this test must run on the main thread, and it's not");
         };
 

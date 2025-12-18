@@ -528,75 +528,78 @@ pub mod os_limited {
         platform::purge_all(items)
     }
 
-    /// Restores all the provided [`TrashItem`] to their original location.
-    ///
-    /// This function consumes the provided items.
-    ///
-    /// # Errors
-    ///
-    /// Errors this function may return include but are not limited to the following.
-    ///
-    /// It may be the case that when restoring a file or a folder, the `original_path` already has
-    /// a new item with the same name. When such a collision happens this function returns a
-    /// [`RestoreCollision`] kind of error.
-    ///
-    /// If two or more of the provided items have identical `original_path`s then a
-    /// [`RestoreTwins`] kind of error is returned.
-    ///
-    /// # Example
-    ///
-    /// Basic usage:
-    ///
-    /// ```
-    /// use std::fs::File;
-    /// use trash::os_limited::{list, restore_all};
-    ///
-    /// let filename = "trash-restore_all-example";
-    /// File::create_new(filename).unwrap();
-    /// restore_all(list().unwrap().into_iter().filter(|x| x.name == filename)).unwrap();
-    /// std::fs::remove_file(filename).unwrap();
-    /// ```
-    ///
-    /// Retry restoring when encountering [`RestoreCollision`] error:
-    ///
-    /// ```no_run
-    /// use trash::os_limited::{list, restore_all};
-    /// use trash::Error::RestoreCollision;
-    ///
-    /// let items = list().unwrap();
-    /// if let Err(RestoreCollision { path, mut remaining_items }) = restore_all(items) {
-    ///     // keep all except the one(s) that couldn't be restored
-    ///     remaining_items.retain(|e| e.original_path() != path);
-    ///     restore_all(remaining_items).unwrap();
-    /// }
-    /// ```
-    ///
-    /// [`RestoreCollision`]: Error::RestoreCollision
-    /// [`RestoreTwins`]: Error::RestoreTwins
-    pub fn restore_all<I>(items: I) -> Result<(), Error>
-    where
-        I: IntoIterator<Item = TrashItem>,
-    {
-        // Check for twins here cause that's pretty platform independent.
-        struct ItemWrapper<'a>(&'a TrashItem);
-        impl PartialEq for ItemWrapper<'_> {
-            fn eq(&self, other: &Self) -> bool {
-                self.0.original_path() == other.0.original_path()
-            }
+    #[deprecated]
+    pub use crate::restore_all;
+}
+
+/// Restores all the provided [`TrashItem`] to their original location.
+///
+/// This function consumes the provided items.
+///
+/// # Errors
+///
+/// Errors this function may return include but are not limited to the following.
+///
+/// It may be the case that when restoring a file or a folder, the `original_path` already has
+/// a new item with the same name. When such a collision happens this function returns a
+/// [`RestoreCollision`] kind of error.
+///
+/// If two or more of the provided items have identical `original_path`s then a
+/// [`RestoreTwins`] kind of error is returned.
+///
+/// # Example
+///
+/// Basic usage:
+///
+/// ```
+/// use std::fs::File;
+/// use trash::os_limited::{list, restore_all};
+///
+/// let filename = "trash-restore_all-example";
+/// File::create_new(filename).unwrap();
+/// restore_all(list().unwrap().into_iter().filter(|x| x.name == filename)).unwrap();
+/// std::fs::remove_file(filename).unwrap();
+/// ```
+///
+/// Retry restoring when encountering [`RestoreCollision`] error:
+///
+/// ```no_run
+/// use trash::os_limited::{list, restore_all};
+/// use trash::Error::RestoreCollision;
+///
+/// let items = list().unwrap();
+/// if let Err(RestoreCollision { path, mut remaining_items }) = restore_all(items) {
+///     // keep all except the one(s) that couldn't be restored
+///     remaining_items.retain(|e| e.original_path() != path);
+///     restore_all(remaining_items).unwrap();
+/// }
+/// ```
+///
+/// [`RestoreCollision`]: Error::RestoreCollision
+/// [`RestoreTwins`]: Error::RestoreTwins
+pub fn restore_all<I>(items: I) -> Result<(), Error>
+where
+    I: IntoIterator<Item = TrashItem>,
+{
+    // Check for twins here cause that's pretty platform independent.
+    struct ItemWrapper<'a>(&'a TrashItem);
+    impl PartialEq for ItemWrapper<'_> {
+        fn eq(&self, other: &Self) -> bool {
+            self.0.original_path() == other.0.original_path()
         }
-        impl Eq for ItemWrapper<'_> {}
-        impl Hash for ItemWrapper<'_> {
-            fn hash<H: Hasher>(&self, state: &mut H) {
-                self.0.original_path().hash(state);
-            }
-        }
-        let items = items.into_iter().collect::<Vec<_>>();
-        let mut item_set = HashSet::with_capacity(items.len());
-        for item in items.iter() {
-            if !item_set.insert(ItemWrapper(item)) {
-                return Err(Error::RestoreTwins { path: item.original_path(), items });
-            }
-        }
-        platform::restore_all(items)
     }
+    impl Eq for ItemWrapper<'_> {}
+    impl Hash for ItemWrapper<'_> {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.0.original_path().hash(state);
+        }
+    }
+    let items = items.into_iter().collect::<Vec<_>>();
+    let mut item_set = HashSet::with_capacity(items.len());
+    for item in items.iter() {
+        if !item_set.insert(ItemWrapper(item)) {
+            return Err(Error::RestoreTwins { path: item.original_path(), items });
+        }
+    }
+    platform::restore_all(items)
 }
