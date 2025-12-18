@@ -298,7 +298,7 @@ mod os_limited {
         assert_eq!(is_empty, is_empty_list, "is_empty() should match empty status from list()");
     }
 
-    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+    #[cfg(all(unix, not(target_os = "ios"), not(target_os = "android")))]
     #[test]
     #[serial]
     fn delete_items_info() {
