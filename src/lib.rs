@@ -29,6 +29,7 @@
 //! distribution it runs on, follows this specification.
 //!
 
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
