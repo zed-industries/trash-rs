@@ -11,7 +11,7 @@ use std::{
     collections::HashSet,
     ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, ErrorKind, Write},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
         fs::PermissionsExt,
@@ -566,12 +566,31 @@ fn move_items_no_replace(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result
     let dst = dst.as_ref();
 
     try_creating_placeholders(src, dst)?;
-    std::fs::rename(src, dst).map_err(|e| (src.to_owned(), e))?;
 
-    // Once everything is moved, lets recursively remove the directory
+    // Try to rename first (fastest option for same filesystem)
+    let Err(e) = std::fs::rename(src, dst) else { return Ok(()) };
+
+    let needs_cross_device_copy = e.kind() == ErrorKind::CrossesDevices;
+    if !needs_cross_device_copy {
+        return Err((src.to_owned(), e));
+    }
+
+    debug!("Cross-device move detected, falling back to copy+delete for {:?}", src);
+
+    // Copy the file/directory
+    if src.is_dir() {
+        copy_dir_all(src, dst)?;
+    } else {
+        std::fs::copy(src, dst).map_err(|e| (src.to_owned(), e))?;
+    }
+
+    // Remove the source
     if src.is_dir() {
         std::fs::remove_dir_all(src).map_err(|e| (src.to_owned(), e))?;
+    } else {
+        std::fs::remove_file(src).map_err(|e| (src.to_owned(), e))?;
     }
+
     Ok(())
 }
 
@@ -586,6 +605,33 @@ fn try_creating_placeholders(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Re
         // Symlink or file
         OpenOptions::new().create_new(true).write(true).open(dst).map_err(|e| (dst.to_owned(), e))?;
     }
+    Ok(())
+}
+
+/// Helper function to recursively copy a directory
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<(), FsError> {
+    let src = src.as_ref();
+    let dst = dst.as_ref();
+
+    std::fs::create_dir_all(dst).map_err(|e| (dst.to_owned(), e))?;
+
+    for entry in std::fs::read_dir(src).map_err(|e| (src.to_owned(), e))? {
+        let entry = entry.map_err(|e| (src.to_owned(), e))?;
+        let file_type = entry.file_type().map_err(|e| (entry.path(), e))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else if file_type.is_symlink() {
+            // Handle symlinks by copying the symlink itself, not the target
+            let target = std::fs::read_link(&src_path).map_err(|e| (src_path.clone(), e))?;
+            std::os::unix::fs::symlink(&target, &dst_path).map_err(|e| (dst_path.clone(), e))?;
+        } else {
+            std::fs::copy(&src_path, &dst_path).map_err(|e| (src_path.clone(), e))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -626,7 +672,7 @@ enum TrashValidity {
 fn folder_validity(path: impl AsRef<Path>) -> Result<TrashValidity, FsError> {
     /// Mask for the sticky bit
     /// Taken from: http://man7.org/linux/man-pages/man7/inode.7.html
-    const S_ISVTX: u32 = 0x1000;
+    const S_ISVTX: u32 = 0o1000;
 
     let path = path.as_ref();
     let metadata = path.symlink_metadata().map_err(|e| (path.to_owned(), e))?;
@@ -645,13 +691,13 @@ fn folder_validity(path: impl AsRef<Path>) -> Result<TrashValidity, FsError> {
 /// https://specifications.freedesktop.org/trash-spec/trashspec-1.0.html
 fn home_trash() -> Result<PathBuf, Error> {
     if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
-        if data_home.len() > 0 {
+        if !data_home.is_empty() {
             let data_home_path = AsRef::<Path>::as_ref(data_home.as_os_str());
             return Ok(data_home_path.join("Trash"));
         }
     }
     if let Some(home) = std::env::var_os("HOME") {
-        if home.len() > 0 {
+        if !home.is_empty() {
             let home_path = AsRef::<Path>::as_ref(home.as_os_str());
             return Ok(home_path.join(".local/share/Trash"));
         }
@@ -661,13 +707,13 @@ fn home_trash() -> Result<PathBuf, Error> {
 
 fn home_topdir(mnt_points: &[MountPoint]) -> Result<PathBuf, Error> {
     if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
-        if data_home.len() > 0 {
+        if !data_home.is_empty() {
             let data_home_path = AsRef::<Path>::as_ref(data_home.as_os_str());
             return Ok(get_first_topdir_containing_path(data_home_path, mnt_points).to_owned());
         }
     }
     if let Some(home) = std::env::var_os("HOME") {
-        if home.len() > 0 {
+        if !home.is_empty() {
             let home_path = AsRef::<Path>::as_ref(home.as_os_str());
             return Ok(get_first_topdir_containing_path(home_path, mnt_points).to_owned());
         }
@@ -733,7 +779,7 @@ fn get_mount_points() -> Result<Vec<MountPoint>, Error> {
             break;
         }
         let dir = unsafe { CStr::from_ptr((*mntent).mnt_dir).to_str().unwrap() };
-        if dir.bytes().len() == 0 {
+        if dir.is_empty() {
             continue;
         }
         let mount_point = unsafe {

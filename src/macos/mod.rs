@@ -129,7 +129,7 @@ impl TrashContext {
 
 fn delete_using_file_mgr<P: AsRef<Path>>(full_paths: &[P], with_info: bool) -> Result<Option<Vec<TrashItem>>, Error> {
     trace!("Starting delete_using_file_mgr");
-    let file_mgr = unsafe { NSFileManager::defaultManager() };
+    let file_mgr = NSFileManager::defaultManager();
     let mut items = if with_info { Vec::with_capacity(full_paths.len()) } else { vec![] };
     for path in full_paths {
         let path_r = path.as_ref();
@@ -140,15 +140,15 @@ fn delete_using_file_mgr<P: AsRef<Path>>(full_paths: &[P], with_info: bool) -> R
         };
 
         trace!("Starting fileURLWithPath");
-        let url = unsafe { NSURL::fileURLWithPath(&path) };
+        let url = NSURL::fileURLWithPath(&path);
         trace!("Finished fileURLWithPath");
 
         trace!("Calling trashItemAtURL");
         let mut out_res_nsurl: Option<Retained<NSURL>> = None;
         let res = if with_info {
-            unsafe { file_mgr.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out_res_nsurl)) }
+            file_mgr.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out_res_nsurl))
         } else {
-            unsafe { file_mgr.trashItemAtURL_resultingItemURL_error(&url, None) }
+            file_mgr.trashItemAtURL_resultingItemURL_error(&url, None)
         };
         trace!("Finished trashItemAtURL");
 

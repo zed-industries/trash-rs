@@ -5,7 +5,142 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 5.2.5 (2025-10-25)
+
+### Bug Fixes
+
+ - <csr-id-23ca2a2ea182fe551ac0d4630ebbb98c3db0abad/> set the `objc2-foundation` to the one that's actually required
+   Otherwise, downstream with Cargo.lock may see build failures.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 1 commit contributed to the release.
+ - 1 day passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#142](https://github.com/Byron/trash-rs/issues/142)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#142](https://github.com/Byron/trash-rs/issues/142)**
+    - Set the `objc2-foundation` to the one that's actually required ([`23ca2a2`](https://github.com/Byron/trash-rs/commit/23ca2a2ea182fe551ac0d4630ebbb98c3db0abad))
+</details>
+
+## 5.2.4 (2025-10-24)
+
+### Bug Fixes
+
+ - <csr-id-c3d2d1d094ea4bde31398855b78af20b19abc6f8/> handle cross-device link errors by falling back to copy+delete on Linux
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 5 commits contributed to the release over the course of 69 calendar days.
+ - 69 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release trash v5.2.4 ([`e3092ad`](https://github.com/Byron/trash-rs/commit/e3092add67470b904e327d1183c7692c55b65bf1))
+    - Merge pull request #141 from muni-corn/cross-device-trash ([`d0784e4`](https://github.com/Byron/trash-rs/commit/d0784e42f99ef572050ffc8bc9abd4002cc9dd78))
+    - Refactor and fixes ([`1894bfe`](https://github.com/Byron/trash-rs/commit/1894bfe4ab6677ca833cc60bbd6e568480abbf77))
+    - Handle cross-device link errors by falling back to copy+delete on Linux ([`c3d2d1d`](https://github.com/Byron/trash-rs/commit/c3d2d1d094ea4bde31398855b78af20b19abc6f8))
+    - Merge branch 'feature-upgrade-objc2' ([`cd22e14`](https://github.com/Byron/trash-rs/commit/cd22e1456bffc6027622cd55f131d43dc5372015))
+</details>
+
+## 5.2.3 (2025-08-15)
+
+Updated the `obj2` crate when building or MacOS.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 4 commits contributed to the release over the course of 114 calendar days.
+ - 0 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Thanks Clippy
+
+<csr-read-only-do-not-edit/>
+
+[Clippy](https://github.com/rust-lang/rust-clippy) helped 1 time to make code idiomatic. 
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release trash v5.2.3 ([`a628ccc`](https://github.com/Byron/trash-rs/commit/a628cccc688c6172bd793ef5dd5791fc987402d7))
+    - Prepare patch release notes. ([`f9be785`](https://github.com/Byron/trash-rs/commit/f9be7851acc660023ee0f3a6d1e58d04a4731c9f))
+    - Upgrade objc2 ([`134c357`](https://github.com/Byron/trash-rs/commit/134c3577e4892878e65fa7af8d24d1910df0fe6e))
+    - Thanks clippy ([`b80f7ed`](https://github.com/Byron/trash-rs/commit/b80f7edb1e3db64ae029b02a26d77c11986d9f11))
+</details>
+
+## 5.2.2 (2025-02-22)
+
+<csr-id-083743e848ff1b2a61af47bb3afdd8aa04e3eace/>
+
+### Chore
+
+ - <csr-id-083743e848ff1b2a61af47bb3afdd8aa04e3eace/> prepare for objc2 frameworks v0.3
+   These will have a bunch of default features enabled, so let's
+   pre-emptively disable them.
+
+### Bug Fixes
+
+ - <csr-id-dffb80d0950c2edd52a7883162fa8923393ea5c8/> Use octal for S_ISVTX sticky bit check
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 7 commits contributed to the release over the course of 76 calendar days.
+ - 77 days passed between releases.
+ - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release trash v5.2.2 ([`2ac29d2`](https://github.com/Byron/trash-rs/commit/2ac29d20a74c88d5933c1545dd4dd285910d2478))
+    - Merge pull request #136 from nebel/master ([`1704f72`](https://github.com/Byron/trash-rs/commit/1704f72605fd1daf1a61d3caaeb6312260df8367))
+    - Use octal for S_ISVTX sticky bit check ([`dffb80d`](https://github.com/Byron/trash-rs/commit/dffb80d0950c2edd52a7883162fa8923393ea5c8))
+    - Merge pull request #135 from madsmtm/objc2-disable-default-features ([`74894a8`](https://github.com/Byron/trash-rs/commit/74894a8a7a32e66d2ef02ae70285437184a07bd3))
+    - Prepare for objc2 frameworks v0.3 ([`083743e`](https://github.com/Byron/trash-rs/commit/083743e848ff1b2a61af47bb3afdd8aa04e3eace))
+    - Merge pull request #132 from eugenesvk/fr-mac-test-out ([`357c3b8`](https://github.com/Byron/trash-rs/commit/357c3b81111c82184ac83b94b74627266314aa82))
+    - Move MacOS specific tests to their own directory ([`ee7f256`](https://github.com/Byron/trash-rs/commit/ee7f2562ee5fbc13702b5bfbd55fc0214a9ea6e8))
+</details>
+
 ## 5.2.1 (2024-12-07)
+
+<csr-id-415c87d81ff859ae40ba5d2e31ffcc44a1ebfffa/>
+<csr-id-6fbad98299ffde1acf2a63552d39e4085664d6f1/>
+<csr-id-3978204c7b5d7ca1038717da3238c82f7bb6a6c6/>
+<csr-id-e58e92baee1f3121114befe73e2a7a1d1dba363e/>
+<csr-id-9ed83e724f944f4eacf2e4cafdf8025548f7a17b/>
+<csr-id-175d6f5de323b2fed7c8049eaf6bb91266171b30/>
+<csr-id-bfbc394a1aba8cb3f348c77f3dffc18a59dde28f/>
+<csr-id-dc7dca02ba13b34d57f63244522044a17e88cecc/>
+<csr-id-9c213c91817d718b1785b9cd8a52d6c87beef936/>
 
 ### Bug Fixes
 
@@ -34,7 +169,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <csr-read-only-do-not-edit/>
 
- - 25 commits contributed to the release.
+ - 26 commits contributed to the release.
  - 11 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -45,6 +180,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release trash v5.2.1 ([`59b0a8a`](https://github.com/Byron/trash-rs/commit/59b0a8a1a1a4625e281b417f7a6e4d4c2a077aea))
     - Escape quoted paths when deleting with AppleScript ([`e1bb697`](https://github.com/Byron/trash-rs/commit/e1bb697a510ec49008d0b4f9a58b38dc061d7901))
     - Support for non-UTF8 paths on HFS+ on MacOS ([`6f0b737`](https://github.com/Byron/trash-rs/commit/6f0b737668c0f9c19e09657e8cbc98caf90e30a9))
     - Various refactors ([`d23a591`](https://github.com/Byron/trash-rs/commit/d23a59166d52c90d7ee02ca2fb356cad0b330eca))
