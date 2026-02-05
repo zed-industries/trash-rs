@@ -287,5 +287,21 @@ fn esc_quote(s: &str) -> Cow<'_, str> {
     }
 }
 
+pub fn restore_all<I>(items: I) -> Result<(), Error>
+where
+    I: IntoIterator<Item = TrashItem>,
+{
+    let mut iter = items.into_iter();
+    while let Some(item) = iter.next() {
+        let original_path = item.original_path();
+        let trash_path = Path::new(&item.id);
+
+        std::fs::create_dir_all(&item.original_parent).map_err(|error| into_unknown(error.to_string()))?;
+        std::fs::rename(&trash_path, &original_path).map_err(|error| into_unknown(error.to_string()))?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;
