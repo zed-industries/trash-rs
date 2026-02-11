@@ -71,7 +71,7 @@ impl TrashContext {
     }
 
     /// Removes all files and folder paths recursively.
-    pub(crate) fn delete_all_canonicalized(&self, full_paths: Vec<PathBuf>) -> Result<(), Error> {
+    pub(crate) fn delete_all_canonicalized(&self, full_paths: Vec<PathBuf>, _with_info: bool) -> Result<(), Error> {
         self.delete_specified_canonicalized(full_paths)?;
         Ok(())
     }

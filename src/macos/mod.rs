@@ -2,12 +2,13 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     process::Command,
+    time::SystemTime,
 };
 
 use log::trace;
 use objc2_foundation::{NSFileManager, NSString, NSURL};
 
-use crate::{into_unknown, Error, TrashContext};
+use crate::{into_unknown, Error, TrashContext, TrashItem};
 
 #[derive(Copy, Clone, Debug)]
 /// There are 2 ways to trash files: via the ≝Finder app or via the OS NsFileManager call
@@ -74,17 +75,23 @@ impl TrashContextExtMacos for TrashContext {
     }
 }
 impl TrashContext {
-    pub(crate) fn delete_all_canonicalized(&self, full_paths: Vec<PathBuf>) -> Result<(), Error> {
+    pub(crate) fn delete_all_canonicalized(
+        &self,
+        full_paths: Vec<PathBuf>,
+        with_info: bool,
+    ) -> Result<Option<Vec<TrashItem>>, Error> {
         match self.platform_specific.delete_method {
-            DeleteMethod::Finder => delete_using_finder(&full_paths),
-            DeleteMethod::NsFileManager => delete_using_file_mgr(&full_paths),
+            DeleteMethod::Finder => delete_using_finder(&full_paths, with_info),
+            DeleteMethod::NsFileManager => delete_using_file_mgr(&full_paths, with_info),
         }
     }
 }
 
-fn delete_using_file_mgr<P: AsRef<Path>>(full_paths: &[P]) -> Result<(), Error> {
+fn delete_using_file_mgr<P: AsRef<Path>>(full_paths: &[P], with_info: bool) -> Result<Option<Vec<TrashItem>>, Error> {
     trace!("Starting delete_using_file_mgr");
     let file_mgr = NSFileManager::defaultManager();
+    let mut trash_items = Vec::<TrashItem>::new();
+
     for path in full_paths {
         let path = path.as_ref().as_os_str().as_encoded_bytes();
         let path = match std::str::from_utf8(path) {
@@ -96,8 +103,10 @@ fn delete_using_file_mgr<P: AsRef<Path>>(full_paths: &[P]) -> Result<(), Error> 
         let url = NSURL::fileURLWithPath(&path);
         trace!("Finished fileURLWithPath");
 
+        let mut trash_url = Some(NSURL::new());
+
         trace!("Calling trashItemAtURL");
-        let res = file_mgr.trashItemAtURL_resultingItemURL_error(&url, None);
+        let res = file_mgr.trashItemAtURL_resultingItemURL_error(&url, Some(&mut trash_url));
         trace!("Finished trashItemAtURL");
 
         if let Err(err) = res {
@@ -105,11 +114,35 @@ fn delete_using_file_mgr<P: AsRef<Path>>(full_paths: &[P]) -> Result<(), Error> 
                 description: format!("While deleting '{:?}', `trashItemAtURL` failed: {err}", &path),
             });
         }
+
+        if with_info {
+            trash_items.push(TrashItem {
+                name: OsString::from(path.lastPathComponent().to_string()),
+                original_parent: path.stringByDeletingLastPathComponent().to_string().into(),
+                id: trash_url
+                    .and_then(|url| url.path())
+                    .map(|path| OsString::from(path.to_string()))
+                    .unwrap_or_default(),
+                time_deleted: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|duration| duration.as_secs() as i64)
+                    .unwrap_or(-1),
+            });
+        }
     }
-    Ok(())
+
+    if with_info {
+        Ok(Some(trash_items))
+    } else {
+        Ok(None)
+    }
 }
 
-fn delete_using_finder<P: AsRef<Path>>(full_paths: &[P]) -> Result<(), Error> {
+/// This method currently has a limitation where `with_info` doesn't change the
+/// result of this method, seeing as The AppleScript `delete` command returns
+/// Finder object references rather than POSIX paths, so we don't attempt to
+/// parse them into TrashItems.
+fn delete_using_finder<P: AsRef<Path>>(full_paths: &[P], _with_info: bool) -> Result<Option<Vec<TrashItem>>, Error> {
     // AppleScript command to move files (or directories) to Trash looks like
     //   osascript -e 'tell application "Finder" to delete { POSIX file "file1", POSIX "file2" }'
     // The `-e` flag is used to execute only one line of AppleScript.
@@ -149,7 +182,10 @@ fn delete_using_finder<P: AsRef<Path>>(full_paths: &[P]) -> Result<(), Error> {
             }
         };
     }
-    Ok(())
+
+    // The AppleScript `delete` command returns Finder object references rather
+    // than POSIX paths, so we don't attempt to parse them into TrashItems.
+    Ok(None)
 }
 
 /// std's from_utf8_lossy, but non-utf8 byte sequences are %-encoded instead of being replaced by a special symbol.
