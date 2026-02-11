@@ -1,10 +1,11 @@
-use std::fs::{create_dir, File};
+use std::env;
+use std::fs::{create_dir, remove_file, File};
 use std::path::{Path, PathBuf};
 
 use log::trace;
 
 use serial_test::serial;
-use trash::{delete, delete_all};
+use trash::{delete, delete_all, TrashContext};
 
 mod util {
     use std::sync::atomic::{AtomicI32, Ordering};
@@ -176,4 +177,38 @@ fn recursive_file_with_content_deletion() {
 
     trash::delete(parent_dir).unwrap();
     assert!(!parent_dir.exists());
+}
+
+#[test]
+#[serial]
+#[cfg(target_os = "macos")]
+fn test_delete_with_info_ns_file_manager() {
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+
+    // Create the test file to be deleted, ensuring that we include the current
+    // directory so we can later assert that the `original_parent` is preserved.
+    let path = env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    File::create_new(&path).unwrap();
+
+    // Create new test context with `NSFileManager`, as that is currently the
+    // only implementation that actually supports returning the trashed item
+    // information.
+    let mut trash = TrashContext::new();
+    trash.set_delete_method(DeleteMethod::NsFileManager);
+
+    match trash.delete_with_info(&path) {
+        Ok(Some(trash_item)) => {
+            // Before asserting any of the fields, we'll go ahead and remove the
+            // trashed file from the trash, otherwise it'll be kept around after
+            // the test is finished, as the test literally moves the file to
+            // macOS' trash.
+            // The returned `Result` is ignored, as we don't want the test to
+            // fail in case we're not able to remove the file from trash.
+            let _ = remove_file(PathBuf::from(trash_item.id));
+
+            assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
+            assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent").as_os_str());
+        }
+        _ => panic!("Calling delete_with_info failed to return TrashItem."),
+    }
 }
