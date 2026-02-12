@@ -17,6 +17,7 @@ use std::{
         fs::PermissionsExt,
     },
     path::{Component, Path, PathBuf},
+    time::SystemTime,
 };
 
 use log::{debug, warn};
@@ -33,10 +34,16 @@ impl PlatformTrashContext {
     }
 }
 impl TrashContext {
-    pub(crate) fn delete_all_canonicalized(&self, full_paths: Vec<PathBuf>, _with_info: bool) -> Result<(), Error> {
+    pub(crate) fn delete_all_canonicalized(
+        &self,
+        full_paths: Vec<PathBuf>,
+        with_info: bool,
+    ) -> Result<Option<Vec<TrashItem>>, Error> {
         let home_trash = home_trash()?;
         let sorted_mount_points = get_sorted_mount_points()?;
         let home_topdir = home_topdir(&sorted_mount_points)?;
+        let mut items: Vec<TrashItem> = Vec::new();
+
         debug!("The home topdir is {:?}", home_topdir);
         let uid = unsafe { libc::getuid() };
         for path in full_paths {
@@ -47,18 +54,37 @@ impl TrashContext {
                 debug!("The topdir was identical to the home topdir, so moving to the home trash.");
                 // Note that the following function creates the trash folder
                 // and its required subfolders in case they don't exist.
-                move_to_trash(path, &home_trash, topdir).map_err(|(p, e)| fs_error(p, e))?;
+                let item = move_to_trash(path, &home_trash, topdir).map_err(|(p, e)| fs_error(p, e))?;
+                if with_info {
+                    items.push(item);
+                }
             } else if topdir.to_str() == Some("/var/home") && home_topdir.to_str() == Some("/") {
                 debug!("The topdir is '/var/home' but the home_topdir is '/', moving to the home trash anyway.");
-                move_to_trash(path, &home_trash, topdir).map_err(|(p, e)| fs_error(p, e))?;
+                let item = move_to_trash(path, &home_trash, topdir).map_err(|(p, e)| fs_error(p, e))?;
+                if with_info {
+                    items.push(item);
+                }
             } else {
+                let mut item = None;
                 execute_on_mounted_trash_folders(uid, topdir, true, true, |trash_path| {
-                    move_to_trash(&path, trash_path, topdir)
+                    let trash_item = move_to_trash(&path, trash_path, topdir)?;
+                    item = Some(trash_item);
+                    Ok(())
                 })
                 .map_err(|(p, e)| fs_error(p, e))?;
+                if with_info {
+                    if let Some(trash_item) = item {
+                        items.push(trash_item);
+                    }
+                }
             }
         }
-        Ok(())
+
+        if with_info {
+            Ok(Some(items))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -450,7 +476,7 @@ fn move_to_trash(
     src: impl AsRef<Path>,
     trash_folder: impl AsRef<Path>,
     _topdir: impl AsRef<Path>,
-) -> Result<(), FsError> {
+) -> Result<TrashItem, FsError> {
     let src = src.as_ref();
     let trash_folder = trash_folder.as_ref();
     let files_folder = trash_folder.join("files");
@@ -537,12 +563,15 @@ fn move_to_trash(
             }
             Ok(_) => {
                 // We did it!
-                break;
+                let original_parent = src.parent().map(Path::to_owned).unwrap_or_default();
+                let name = src.file_name().map(OsStr::to_owned).unwrap_or_default();
+                let time_deleted =
+                    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(-1);
+
+                return Ok(TrashItem { id: info_file_path.into_os_string(), name, original_parent, time_deleted });
             }
         }
     }
-
-    Ok(())
 }
 
 /// An error may mean that a collision was found.

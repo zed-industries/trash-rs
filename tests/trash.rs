@@ -1,11 +1,15 @@
-use std::env;
-use std::fs::{create_dir, remove_file, File};
+use std::fs::{create_dir, File};
 use std::path::{Path, PathBuf};
 
 use log::trace;
 
 use serial_test::serial;
-use trash::{delete, delete_all, TrashContext};
+use trash::{delete, delete_all};
+
+#[cfg(not(target_os = "windows"))]
+use std::env;
+use std::fs::remove_file;
+use trash::TrashContext;
 
 mod util {
     use std::sync::atomic::{AtomicI32, Ordering};
@@ -205,6 +209,40 @@ fn test_delete_with_info_ns_file_manager() {
             // The returned `Result` is ignored, as we don't want the test to
             // fail in case we're not able to remove the file from trash.
             let _ = remove_file(PathBuf::from(trash_item.id));
+
+            assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
+            assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent").as_os_str());
+        }
+        _ => panic!("Calling delete_with_info failed to return TrashItem."),
+    }
+}
+
+#[test]
+#[serial]
+#[cfg(target_os = "linux")]
+fn test_delete_with_info() {
+    // Create the test file to be deleted, ensuring that we include the current
+    // directory so we can later assert that the `original_parent` is preserved.
+    let path = env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    File::create_new(&path).unwrap();
+
+    // Create a new trash context for deleting the file with info.
+    let trash = TrashContext::new();
+
+    match trash.delete_with_info(&path) {
+        Ok(Some(trash_item)) => {
+            // Before asserting any of the fields, we'll go ahead and remove the
+            // trashed file from the Freedesktop trash, otherwise it'll be kept
+            // around after the test is finished.
+            // On Freedesktop, `id` points to the `.trashinfo` file. The actual
+            // trashed file lives in the sibling `files/` directory, so we need
+            // to clean up both.
+            let info_path = PathBuf::from(&trash_item.id);
+            let _ = remove_file(&info_path);
+            if let Some(info_dir) = info_path.parent().and_then(|p| p.parent()) {
+                let file_in_trash = info_dir.join("files").join(info_path.file_stem().unwrap_or_default());
+                let _ = std::fs::remove_file(&file_in_trash).or_else(|_| std::fs::remove_dir_all(&file_in_trash));
+            }
 
             assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
             assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent").as_os_str());
