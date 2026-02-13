@@ -4,13 +4,14 @@ use std::{
     ffi::{c_void, OsStr, OsString},
     os::windows::{ffi::OsStrExt, prelude::*},
     path::PathBuf,
+    sync::{Arc, Mutex},
 };
 use windows::Win32::{
     Foundation::*, Storage::EnhancedStorage::*, System::Com::*, System::SystemServices::*,
     UI::Shell::PropertiesSystem::*, UI::Shell::*,
 };
 use windows::{
-    core::{Interface, PCWSTR, PWSTR},
+    core::{implement, Interface, PCWSTR, PWSTR},
     Win32::System::Com::StructuredStorage::PropVariantToBSTR,
 };
 
@@ -35,13 +36,30 @@ impl PlatformTrashContext {
     }
 }
 impl TrashContext {
+    /// Removes all files and folder paths recursively.
     /// See https://docs.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-_shfileopstructa
-    pub(crate) fn delete_specified_canonicalized(&self, full_paths: Vec<PathBuf>) -> Result<(), Error> {
+    pub(crate) fn delete_all_canonicalized(
+        &self,
+        full_paths: Vec<PathBuf>,
+        with_info: bool,
+    ) -> Result<Option<Vec<TrashItem>>, Error> {
         ensure_com_initialized();
         unsafe {
-            let pfo: IFileOperation = CoCreateInstance(&FileOperation as *const _, None, CLSCTX_ALL).unwrap();
+            let pfo: IFileOperation = CoCreateInstance(&FileOperation as *const _, None, CLSCTX_ALL)?;
 
             pfo.SetOperationFlags(FOF_NO_UI | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING)?;
+
+            // Set up progress sink to collect trash item IDs if requested
+            // We need to keep sink_interface alive until after PerformOperations completes
+            let (ids_arc, _sink_interface) = if with_info {
+                let sink = TrashProgressSink::new();
+                let ids_arc = sink.ids.clone();
+                let sink_interface: IFileOperationProgressSink = sink.into();
+                pfo.Advise(&sink_interface)?;
+                (Some(ids_arc), Some(sink_interface))
+            } else {
+                (None, None)
+            };
 
             for full_path in full_paths.iter() {
                 let path_prefix = ['\\' as u16, '\\' as u16, '?' as u16, '\\' as u16];
@@ -66,14 +84,24 @@ impl TrashContext {
                 // the list of HRESULT codes is not documented.
                 return Err(Error::Unknown { description: "Some operations were aborted".into() });
             }
-            Ok(())
-        }
-    }
 
-    /// Removes all files and folder paths recursively.
-    pub(crate) fn delete_all_canonicalized(&self, full_paths: Vec<PathBuf>, _with_info: bool) -> Result<(), Error> {
-        self.delete_specified_canonicalized(full_paths)?;
-        Ok(())
+            // Look up full TrashItem metadata for collected IDs
+            if let Some(ids_arc) = ids_arc {
+                let ids = ids_arc
+                    .lock()
+                    .map_err(|e| Error::Unknown { description: format!("Failed to lock trash item ids: {}", e) })?;
+
+                let mut items = Vec::with_capacity(ids.len());
+                for id in ids.iter() {
+                    if let Ok(item) = get_trash_item_by_id(id) {
+                        items.push(item);
+                    }
+                }
+                Ok(Some(items))
+            } else {
+                Ok(None)
+            }
+        }
     }
 }
 
@@ -267,6 +295,188 @@ unsafe fn get_date_deleted_unix(item: &IShellItem2) -> Result<i64, Error> {
     let seconds_since_unix_epoch = rel_to_linux_epoch / HUNDREDS_OF_NANOSECONDS;
 
     Ok(seconds_since_unix_epoch as i64)
+}
+
+/// Look up a TrashItem by its ID (parsing name) from the recycle bin
+unsafe fn get_trash_item_by_id(id: &OsStr) -> Result<TrashItem, Error> {
+    let id_as_wide = to_wide_path(id);
+    let parsing_name = PCWSTR(id_as_wide.as_ptr());
+    let item: IShellItem = SHCreateItemFromParsingName(parsing_name, None)?;
+    let item2: IShellItem2 = item.cast()?;
+
+    let name = get_display_name(&item, SIGDN_PARENTRELATIVE)?;
+    let original_location_variant = item2.GetProperty(&SCID_ORIGINAL_LOCATION)?;
+    let original_location_bstr = PropVariantToBSTR(&original_location_variant)?;
+    let original_location = OsString::from_wide(original_location_bstr.as_wide());
+    let time_deleted = get_date_deleted_unix(&item2)?;
+
+    Ok(TrashItem {
+        id: id.to_os_string(),
+        name: name.into_string().map_err(|original| Error::ConvertOsString { original })?.into(),
+        original_parent: PathBuf::from(original_location),
+        time_deleted,
+    })
+}
+
+/// A COM object implementing IFileOperationProgressSink to collect trash item IDs
+/// during delete operations. The PostDeleteItem callback receives the newly created
+/// item in the Recycle Bin, and we collect its ID (parsing name) for later lookup.
+///
+/// We only collect IDs here because the full metadata (original location, delete time)
+/// may not be available immediately in the callback. After operations complete, we
+/// look up the full metadata using these IDs.
+#[implement(IFileOperationProgressSink)]
+pub(crate) struct TrashProgressSink {
+    /// Collected IDs (parsing names) of items moved to the recycle bin
+    pub ids: Arc<Mutex<Vec<OsString>>>,
+}
+
+impl TrashProgressSink {
+    pub fn new() -> Self {
+        Self { ids: Arc::new(Mutex::new(Vec::new())) }
+    }
+}
+
+impl IFileOperationProgressSink_Impl for TrashProgressSink {
+    fn StartOperations(&self) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn FinishOperations(&self, _hrresult: windows::core::HRESULT) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PreRenameItem(
+        &self,
+        _dwflags: u32,
+        _psiitem: Option<&IShellItem>,
+        _psznewname: &PCWSTR,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PostRenameItem(
+        &self,
+        _dwflags: u32,
+        _psiitem: Option<&IShellItem>,
+        _psznewname: &PCWSTR,
+        _hrrename: windows::core::HRESULT,
+        _psinewlycreated: Option<&IShellItem>,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PreMoveItem(
+        &self,
+        _dwflags: u32,
+        _psiitem: Option<&IShellItem>,
+        _psidestinationfolder: Option<&IShellItem>,
+        _psznewname: &PCWSTR,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PostMoveItem(
+        &self,
+        _dwflags: u32,
+        _psiitem: Option<&IShellItem>,
+        _psidestinationfolder: Option<&IShellItem>,
+        _psznewname: &PCWSTR,
+        _hrmove: windows::core::HRESULT,
+        _psinewlycreated: Option<&IShellItem>,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PreCopyItem(
+        &self,
+        _dwflags: u32,
+        _psiitem: Option<&IShellItem>,
+        _psidestinationfolder: Option<&IShellItem>,
+        _psznewname: &PCWSTR,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PostCopyItem(
+        &self,
+        _dwflags: u32,
+        _psiitem: Option<&IShellItem>,
+        _psidestinationfolder: Option<&IShellItem>,
+        _psznewname: &PCWSTR,
+        _hrcopy: windows::core::HRESULT,
+        _psinewlycreated: Option<&IShellItem>,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PreDeleteItem(&self, _dwflags: u32, _psiitem: Option<&IShellItem>) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PostDeleteItem(
+        &self,
+        _dwflags: u32,
+        _psiitem: Option<&IShellItem>,
+        hrdelete: windows::core::HRESULT,
+        psinewlycreated: Option<&IShellItem>,
+    ) -> windows::core::Result<()> {
+        // Only process if the delete succeeded and we have a new item in the trash
+        // HRESULT success codes have the high bit clear (SUCCEEDED macro check)
+        // hrdelete.is_ok() only checks for S_OK (0), but other success codes exist
+        let succeeded = hrdelete.0 >= 0;
+        if succeeded {
+            if let Some(trash_item) = psinewlycreated {
+                // Just collect the ID (parsing name) - we'll look up full metadata later
+                unsafe {
+                    if let Ok(id) = get_display_name(trash_item, SIGDN_DESKTOPABSOLUTEPARSING) {
+                        if let Ok(mut ids) = self.ids.lock() {
+                            ids.push(id);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn PreNewItem(
+        &self,
+        _dwflags: u32,
+        _psidestinationfolder: Option<&IShellItem>,
+        _psznewname: &PCWSTR,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PostNewItem(
+        &self,
+        _dwflags: u32,
+        _psidestinationfolder: Option<&IShellItem>,
+        _psznewname: &PCWSTR,
+        _psztemplatename: &PCWSTR,
+        _dwfileattributes: u32,
+        _hrnew: windows::core::HRESULT,
+        _psinewitem: Option<&IShellItem>,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn UpdateProgress(&self, _iworktotal: u32, _iworksofar: u32) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn ResetTimer(&self) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn PauseTimer(&self) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn ResumeTimer(&self) -> windows::core::Result<()> {
+        Ok(())
+    }
 }
 
 struct CoInitializer {}
