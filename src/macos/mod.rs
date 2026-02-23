@@ -138,27 +138,48 @@ fn delete_using_file_mgr<P: AsRef<Path>>(full_paths: &[P], with_info: bool) -> R
     }
 }
 
-/// This method currently has a limitation where `with_info` doesn't change the
-/// result of this method, seeing as The AppleScript `delete` command returns
-/// Finder object references rather than POSIX paths, so we don't attempt to
-/// parse them into TrashItems.
-fn delete_using_finder<P: AsRef<Path>>(full_paths: &[P], _with_info: bool) -> Result<Option<Vec<TrashItem>>, Error> {
+fn delete_using_finder<P: AsRef<Path>>(full_paths: &[P], with_info: bool) -> Result<Option<Vec<TrashItem>>, Error> {
     // AppleScript command to move files (or directories) to Trash looks like
-    //   osascript -e 'tell application "Finder" to delete { POSIX file "file1", POSIX "file2" }'
-    // The `-e` flag is used to execute only one line of AppleScript.
+    // the snippet below, with `-e` being used to execute only one line of
+    // AppleScript.
+    //
+    // ```
+    // osascript -e 'tell application "Finder" to delete { POSIX file "file1", POSIX "file2" }'
+    // ```
     let mut command = Command::new("osascript");
     let posix_files = full_paths
         .iter()
-        .map(|p| {
-            let path_b = p.as_ref().as_os_str().as_encoded_bytes();
-            match std::str::from_utf8(path_b) {
+        .map(|path| {
+            let path_bytes = path.as_ref().as_os_str().as_encoded_bytes();
+
+            match std::str::from_utf8(path_bytes) {
                 Ok(path_utf8) => format!(r#"POSIX file "{}""#, esc_quote(path_utf8)), // utf-8 path, escape \"
-                Err(_) => format!(r#"POSIX file "{}""#, esc_quote(&percent_encode(path_b))), // binary path, %-encode it and escape \"
+                Err(_) => format!(r#"POSIX file "{}""#, esc_quote(&percent_encode(path_bytes))), // binary path, %-encode it and escape \"
             }
         })
         .collect::<Vec<String>>()
         .join(", ");
-    let script = format!("tell application \"Finder\" to delete {{ {posix_files} }}");
+
+    // When `with_info` is requested, we convert the Finder object references
+    // returned by `delete` into POSIX paths using `as alias`. The results are
+    // newline-delimited so we can split them reliably (commas would be
+    // ambiguous for filenames containing commas).
+    let script = if with_info {
+        format!(
+            r#"tell application "Finder"
+    set trashedItems to delete {{ {posix_files} }}
+    if class of trashedItems is not list then set trashedItems to {{trashedItems}}
+    set posixPaths to ""
+    repeat with t in trashedItems
+        if posixPaths is not "" then set posixPaths to posixPaths & linefeed
+        set posixPaths to posixPaths & POSIX path of (t as alias)
+    end repeat
+    return posixPaths
+end tell"#
+        )
+    } else {
+        format!("tell application \"Finder\" to delete {{ {posix_files} }}")
+    };
 
     let argv: Vec<OsString> = vec!["-e".into(), script.into()];
     command.args(argv);
@@ -183,9 +204,36 @@ fn delete_using_finder<P: AsRef<Path>>(full_paths: &[P], _with_info: bool) -> Re
         };
     }
 
-    // The AppleScript `delete` command returns Finder object references rather
-    // than POSIX paths, so we don't attempt to parse them into TrashItems.
-    Ok(None)
+    if with_info {
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let time_deleted = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or(-1);
+
+        // In practice, the Finder `delete` command returns results in the same
+        // order as the input. We rely on this to pair trash paths with their
+        // original paths via `.zip()`.
+        let trash_items: Vec<TrashItem> = stdout
+            .lines()
+            .zip(full_paths.iter())
+            .map(|(trash_path, original_path)| {
+                let trash_path = Path::new(trash_path);
+                let original = original_path.as_ref();
+
+                TrashItem {
+                    id: trash_path.as_os_str().to_os_string(),
+                    name: original.file_name().map(|name| name.to_os_string()).unwrap_or_default(),
+                    original_parent: original.parent().map(Path::to_owned).unwrap_or_default(),
+                    time_deleted,
+                }
+            })
+            .collect();
+
+        Ok(Some(trash_items))
+    } else {
+        Ok(None)
+    }
 }
 
 /// std's from_utf8_lossy, but non-utf8 byte sequences are %-encoded instead of being replaced by a special symbol.

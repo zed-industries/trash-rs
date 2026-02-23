@@ -199,7 +199,7 @@ fn test_delete_with_info_ns_file_manager() {
     trash.set_delete_method(DeleteMethod::NsFileManager);
 
     match trash.delete_with_info(&path) {
-        Ok(Some(trash_item)) => {
+        Ok(trash_item) => {
             // Before asserting any of the fields, we'll go ahead and remove the
             // trashed file from the trash, otherwise it'll be kept around after
             // the test is finished, as the test literally moves the file to
@@ -217,6 +217,39 @@ fn test_delete_with_info_ns_file_manager() {
 
 #[test]
 #[serial]
+#[cfg(target_os = "macos")]
+fn test_delete_with_info_finder() {
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+
+    // Create the test file to be deleted, ensuring that we include the current
+    // directory so we can later assert that the `original_parent` is preserved.
+    let path = env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    File::create_new(&path).unwrap();
+
+    let mut trash = TrashContext::new();
+    trash.set_delete_method(DeleteMethod::Finder);
+
+    match trash.delete_with_info(&path) {
+        Ok(trash_item) => {
+            // Clean up the trashed file so it doesn't linger in macOS' trash.
+            let _ = std::fs::remove_file(PathBuf::from(&trash_item.id));
+
+            assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
+            assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent").as_os_str());
+            // Verify that the id points to a path inside the .Trash directory
+            let id_path = PathBuf::from(&trash_item.id);
+            assert!(
+                id_path.to_string_lossy().contains(".Trash"),
+                "Expected trash item id to contain '.Trash', got: {:?}",
+                id_path
+            );
+        }
+        _ => panic!("Calling delete_with_info with Finder method failed to return TrashItem."),
+    }
+}
+
+#[test]
+#[serial]
 #[cfg(target_os = "linux")]
 fn test_delete_with_info() {
     // Create the test file to be deleted, ensuring that we include the current
@@ -228,7 +261,7 @@ fn test_delete_with_info() {
     let trash = TrashContext::new();
 
     match trash.delete_with_info(&path) {
-        Ok(Some(trash_item)) => {
+        Ok(trash_item) => {
             // Before asserting any of the fields, we'll go ahead and remove the
             // trashed file from the Freedesktop trash, otherwise it'll be kept
             // around after the test is finished.
@@ -264,7 +297,7 @@ fn test_delete_with_info() {
     let trash = TrashContext::new();
 
     match trash.delete_with_info(&path) {
-        Ok(Some(trash_item)) => {
+        Ok(trash_item) => {
             // Before asserting any of the fields, we'll go ahead and remove the
             // trashed file from the Recycle Bin, otherwise it'll be kept around
             // after the test is finished.
