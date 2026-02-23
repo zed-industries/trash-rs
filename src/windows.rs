@@ -312,12 +312,7 @@ unsafe fn get_trash_item_by_id(id: &OsStr) -> Result<TrashItem, Error> {
     let original_location = OsString::from_wide(original_location_bstr.as_wide());
     let time_deleted = get_date_deleted_unix(&item2)?;
 
-    Ok(TrashItem {
-        id: id.to_os_string(),
-        name: name.into_string().map_err(|original| Error::ConvertOsString { original })?.into(),
-        original_parent: PathBuf::from(original_location),
-        time_deleted,
-    })
+    Ok(TrashItem { id: id.to_os_string(), name, original_parent: PathBuf::from(original_location), time_deleted })
 }
 
 /// A COM object implementing IFileOperationProgressSink to collect trash item IDs
