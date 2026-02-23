@@ -206,7 +206,7 @@ fn test_delete_with_info_ns_file_manager() {
             // macOS' trash.
             // The returned `Result` is ignored, as we don't want the test to
             // fail in case we're not able to remove the file from trash.
-            let _ = remove_file(PathBuf::from(trash_item.id));
+            let _ = std::fs::remove_file(PathBuf::from(trash_item.id));
 
             assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
             assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent").as_os_str());

@@ -110,15 +110,13 @@ impl TrashContext {
         let full_paths = canonicalize_paths(paths)?;
         trace!("Finished canonicalize_paths");
 
-        match self.delete_all_canonicalized(full_paths, false) {
-            Ok(_) => Ok(()),
-            Err(err) => Err(err),
-        }
+        self.delete_all_canonicalized(full_paths, false).map(|_| ())
     }
 
     /// Same as `delete`, but returns a `TrashItem` describing where the file
     /// ended up in trash.
-    /// Returns `None` on platforms that don't support returning trash info.
+    /// Returns `None` when trash item info is unavailable (e.g. when using the
+    /// Finder delete method on macOS).
     pub fn delete_with_info<T: AsRef<Path>>(&self, path: T) -> Result<Option<TrashItem>, Error> {
         match self.delete_all_with_info(&[path])? {
             Some(mut items) => Ok(items.pop()),
@@ -128,7 +126,8 @@ impl TrashContext {
 
     /// Same as `delete_all` but returns `TrashItem`s describing where files
     /// ended up in the trash.
-    /// Returns `None` on platforms that don't support returning trash info.
+    /// Returns `None` when trash item info is unavailable (e.g. when using the
+    /// Finder delete method on macOS).
     pub fn delete_all_with_info<I, T>(&self, paths: I) -> Result<Option<Vec<TrashItem>>, Error>
     where
         I: IntoIterator<Item = T>,

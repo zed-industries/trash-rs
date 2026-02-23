@@ -1,4 +1,5 @@
 use crate::{Error, TrashContext, TrashItem, TrashItemMetadata, TrashItemSize};
+use log::warn;
 use std::{
     borrow::Borrow,
     ffi::{c_void, OsStr, OsString},
@@ -93,8 +94,9 @@ impl TrashContext {
 
                 let mut items = Vec::with_capacity(ids.len());
                 for id in ids.iter() {
-                    if let Ok(item) = get_trash_item_by_id(id) {
-                        items.push(item);
+                    match get_trash_item_by_id(id) {
+                        Ok(item) => items.push(item),
+                        Err(err) => warn!("Failed to look up trash item metadata for {:?}: {}", id, err),
                     }
                 }
                 Ok(Some(items))

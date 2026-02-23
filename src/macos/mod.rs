@@ -103,7 +103,7 @@ fn delete_using_file_mgr<P: AsRef<Path>>(full_paths: &[P], with_info: bool) -> R
         let url = NSURL::fileURLWithPath(&path);
         trace!("Finished fileURLWithPath");
 
-        let mut trash_url = Some(NSURL::new());
+        let mut trash_url = None;
 
         trace!("Calling trashItemAtURL");
         let res = file_mgr.trashItemAtURL_resultingItemURL_error(&url, Some(&mut trash_url));
