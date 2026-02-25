@@ -6,9 +6,6 @@ use log::trace;
 use serial_test::serial;
 use trash::{delete, delete_all};
 
-use std::env;
-use trash::TrashContext;
-
 mod util {
     use std::sync::atomic::{AtomicI32, Ordering};
 
