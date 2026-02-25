@@ -1,5 +1,6 @@
 use crate::{
     macos::{percent_encode, DeleteMethod, TrashContextExtMacos},
+    restore_all,
     tests::{get_unique_name, init_logging},
     TrashContext,
 };
@@ -173,4 +174,60 @@ fn test_delete_with_info_finder() {
         }
         _ => panic!("Calling delete_with_info with Finder method failed to return TrashItem."),
     }
+}
+
+#[test]
+#[serial]
+fn test_restore_all_restore_collision_file_manager() {
+    let mut cleanup_paths = CleanupPaths::new();
+    let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    cleanup_paths.push(path.clone());
+    File::create_new(&path).unwrap();
+
+    let mut trash = TrashContext::new();
+    trash.set_delete_method(DeleteMethod::NsFileManager);
+
+    let trash_item = trash.delete_with_info(&path).expect("Should be able to delete file");
+    cleanup_paths.push(PathBuf::from(&trash_item.id));
+
+    // Create a new file where the original trashed item was, so that restoring
+    // it causes a collision.
+    File::create_new(&path).expect("Should be able to create file for collision");
+
+    match restore_all(vec![trash_item.clone()]) {
+        Err(super::Error::RestoreCollision { path: collision_path, remaining_items }) => {
+            assert_eq!(collision_path, path);
+            assert_eq!(remaining_items.len(), 1);
+            assert_eq!(remaining_items[0].original_path(), path);
+        }
+        _ => panic!("Calling delete_with_info with Finder method failed to return TrashItem."),
+    };
+}
+
+#[test]
+#[serial]
+fn test_restore_all_restore_collision_finder() {
+    let mut cleanup_paths = CleanupPaths::new();
+    let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    cleanup_paths.push(path.clone());
+    File::create_new(&path).unwrap();
+
+    let mut trash = TrashContext::new();
+    trash.set_delete_method(DeleteMethod::Finder);
+
+    let trash_item = trash.delete_with_info(&path).expect("Should be able to delete file");
+    cleanup_paths.push(PathBuf::from(&trash_item.id));
+
+    // Create a new file where the original trashed item was, so that restoring
+    // it causes a collision.
+    File::create_new(&path).expect("Should be able to create file for collision");
+
+    match restore_all(vec![trash_item.clone()]) {
+        Err(super::Error::RestoreCollision { path: collision_path, remaining_items }) => {
+            assert_eq!(collision_path, path);
+            assert_eq!(remaining_items.len(), 1);
+            assert_eq!(remaining_items[0].original_path(), path);
+        }
+        _ => panic!("Calling delete_with_info with Finder method failed to return TrashItem."),
+    };
 }
