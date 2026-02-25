@@ -10,6 +10,30 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Holds a list of paths to files to clean up after a test.
+///
+/// Simply push the paths for whatever file was created during tests and the
+/// `Drop` implementation will clean up the files after the test.
+struct CleanupPaths(Vec<PathBuf>);
+
+impl CleanupPaths {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn push(&mut self, path: PathBuf) {
+        self.0.push(path);
+    }
+}
+
+impl Drop for CleanupPaths {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 #[test]
 #[serial]
 fn test_delete_with_finder_quoted_paths() {
@@ -101,4 +125,52 @@ fn create_hfs_volume() -> std::io::Result<(impl Drop, tempfile::TempDir)> {
         })
     };
     Ok((cleanup, tmp))
+}
+
+#[test]
+#[serial]
+fn test_delete_with_info_ns_file_manager() {
+    let mut cleanup_paths = CleanupPaths::new();
+    let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    cleanup_paths.push(path.clone());
+    File::create_new(&path).unwrap();
+
+    let mut trash = TrashContext::new();
+    trash.set_delete_method(DeleteMethod::NsFileManager);
+
+    match trash.delete_with_info(&path) {
+        Ok(trash_item) => {
+            let id_path = PathBuf::from(&trash_item.id);
+            cleanup_paths.push(id_path.clone());
+
+            assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
+            assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent").as_os_str());
+            assert!(id_path.to_string_lossy().contains(".Trash"))
+        }
+        _ => panic!("Calling delete_with_info failed to return TrashItem."),
+    }
+}
+
+#[test]
+#[serial]
+fn test_delete_with_info_finder() {
+    let mut cleanup_paths = CleanupPaths::new();
+    let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    cleanup_paths.push(path.clone());
+    File::create_new(&path).unwrap();
+
+    let mut trash = TrashContext::new();
+    trash.set_delete_method(DeleteMethod::Finder);
+
+    match trash.delete_with_info(&path) {
+        Ok(trash_item) => {
+            let id_path = PathBuf::from(&trash_item.id);
+            cleanup_paths.push(id_path.clone());
+
+            assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
+            assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent").as_os_str());
+            assert!(id_path.to_string_lossy().contains(".Trash"))
+        }
+        _ => panic!("Calling delete_with_info with Finder method failed to return TrashItem."),
+    }
 }
