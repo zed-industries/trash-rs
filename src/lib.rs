@@ -411,21 +411,22 @@ pub struct TrashItemMetadata {
 ///
 /// ```
 /// use std::fs::File;
-/// use trash::os_limited::{list, restore_all};
+/// use trash::{delete_with_info, restore_all};
 ///
 /// let filename = "trash-restore_all-example";
 /// File::create_new(filename).unwrap();
-/// restore_all(list().unwrap().into_iter().filter(|x| x.name == filename)).unwrap();
+/// let item = delete_with_info(filename).unwrap();
+/// restore_all([item]).unwrap();
 /// std::fs::remove_file(filename).unwrap();
 /// ```
 ///
 /// Retry restoring when encountering [`RestoreCollision`] error:
 ///
 /// ```no_run
-/// use trash::os_limited::{list, restore_all};
+/// use trash::{delete_with_info, restore_all};
 /// use trash::Error::RestoreCollision;
 ///
-/// let items = list().unwrap();
+/// let items = vec![delete_with_info("some-file").unwrap()];
 /// if let Err(RestoreCollision { path, mut remaining_items }) = restore_all(items) {
 ///     // keep all except the one(s) that couldn't be restored
 ///     remaining_items.retain(|e| e.original_path() != path);
@@ -472,11 +473,7 @@ pub mod os_limited {
     //! This module provides functionality which is only supported on Windows and
     //! Linux or other Freedesktop Trash compliant environment.
 
-    use std::{
-        borrow::Borrow,
-        collections::HashSet,
-        hash::{Hash, Hasher},
-    };
+    use std::{borrow::Borrow, collections::HashSet};
 
     use super::{platform, Error, TrashItem, TrashItemMetadata};
 

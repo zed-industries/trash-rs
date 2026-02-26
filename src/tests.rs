@@ -123,7 +123,7 @@ mod os_limited {
     #[test]
     fn restore_empty() {
         init_logging();
-        trash::os_limited::restore_all(vec![]).unwrap();
+        trash::restore_all(vec![]).unwrap();
     }
 
     #[test]
@@ -176,7 +176,7 @@ mod os_limited {
             .filter(|x| x.name.as_encoded_bytes().starts_with(file_name_prefix.as_bytes()))
             .collect();
         assert_eq!(targets.len(), file_count);
-        trash::os_limited::restore_all(targets).unwrap();
+        trash::restore_all(targets).unwrap();
         let remaining = trash::os_limited::list()
             .unwrap()
             .into_iter()
@@ -220,7 +220,7 @@ mod os_limited {
             .collect();
         targets.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(targets.len(), file_count);
-        let remaining_count = match trash::os_limited::restore_all(targets) {
+        let remaining_count = match trash::restore_all(targets) {
             Err(trash::Error::RestoreCollision { remaining_items, .. }) => {
                 let contains = |v: &Vec<trash::TrashItem>, name: &String| {
                     for curr in v.iter() {
@@ -279,7 +279,7 @@ mod os_limited {
             .collect();
         targets.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(targets.len(), file_count + 1); // plus one for one of the twins
-        match trash::os_limited::restore_all(targets) {
+        match trash::restore_all(targets) {
             Err(trash::Error::RestoreTwins { path, items }) => {
                 assert_eq!(path.file_name().unwrap().to_str().unwrap(), twin_name);
                 trash::os_limited::purge_all(items).unwrap();

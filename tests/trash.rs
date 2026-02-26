@@ -1,10 +1,11 @@
+use std::env;
 use std::fs::{create_dir, File};
 use std::path::{Path, PathBuf};
 
 use log::trace;
 
 use serial_test::serial;
-use trash::{delete, delete_all};
+use trash::{delete, delete_all, TrashContext};
 
 mod util {
     use std::sync::atomic::{AtomicI32, Ordering};

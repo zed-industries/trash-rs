@@ -952,8 +952,9 @@ mod tests {
 
     use crate::{
         canonicalize_paths, delete, delete_all,
-        os_limited::{list, purge_all, restore_all},
+        os_limited::{list, purge_all},
         platform::encode_uri_path,
+        restore_all,
         tests::get_unique_name,
         Error,
     };

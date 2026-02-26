@@ -310,7 +310,7 @@ where
             });
         }
 
-        std::fs::rename(&trash_path, &original_path).map_err(|error| fs_error(&original_path, error))?;
+        std::fs::rename(trash_path, &original_path).map_err(|error| fs_error(&original_path, error))?;
     }
 
     Ok(())
