@@ -2,10 +2,10 @@ use crate::{
     macos::{percent_encode, DeleteMethod, TrashContextExtMacos},
     restore_all,
     tests::{get_unique_name, init_logging},
-    TrashContext,
+    Error, TrashContext, TrashItem,
 };
 use serial_test::serial;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -230,4 +230,24 @@ fn test_restore_all_restore_collision_finder() {
         }
         _ => panic!("Calling delete_with_info with Finder method failed to return TrashItem."),
     };
+}
+
+#[test]
+fn test_restore_all_missing_trash_item() {
+    // Simulate providing a `TrashItem` to `restore_all` for a non-existing
+    // file, i.e., a file that isn't actually in the trash, so we can confirm
+    // that an error is returned.
+    //
+    // It doesn't matter that the `id` actually points to a file in the trash,
+    // we simply need to assert that `restore_all` checks whether `TrashItem.id`
+    // actually exists before attempting to restore it.
+    let id = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    let name: OsString = id.file_name().expect("Should be able to get the file name").into();
+    let original_parent = id.parent().expect("Should be able to get parent").to_path_buf();
+    let time_deleted = 0;
+    let trash_item = TrashItem { id: id.clone().into(), name, original_parent, time_deleted };
+
+    let err = restore_all(vec![trash_item]).expect_err("Should fail to restore non-existing file");
+    let description = format!("Trash item not found at {:?}", id);
+    assert!(matches!(err, Error::Unknown { description: d } if d == description))
 }

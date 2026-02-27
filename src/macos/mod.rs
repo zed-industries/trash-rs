@@ -301,7 +301,11 @@ where
         let original_path = item.original_path();
         let trash_path = Path::new(&item.id);
 
-        std::fs::create_dir_all(&item.original_parent).map_err(|error| fs_error(&original_path, error))?;
+        // Ensure that both the trash item still exists, as well as that the
+        // there's no collision on the original path before proceeding.
+        if !std::fs::exists(&item.id).map_err(into_unknown)? {
+            return Err(Error::Unknown { description: format!("Trash item not found at {:?}", item.id) });
+        }
 
         if std::fs::exists(&original_path).map_err(|error| fs_error(&original_path, error))? {
             return Err(Error::RestoreCollision {
@@ -310,6 +314,7 @@ where
             });
         }
 
+        std::fs::create_dir_all(&item.original_parent).map_err(|error| fs_error(&original_path, error))?;
         std::fs::rename(trash_path, &original_path).map_err(|error| fs_error(&original_path, error))?;
     }
 

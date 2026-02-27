@@ -1,11 +1,10 @@
-use std::env;
 use std::fs::{create_dir, File};
 use std::path::{Path, PathBuf};
 
 use log::trace;
 
 use serial_test::serial;
-use trash::{delete, delete_all, TrashContext};
+use trash::{delete, delete_all};
 
 mod util {
     use std::sync::atomic::{AtomicI32, Ordering};
@@ -185,11 +184,11 @@ fn recursive_file_with_content_deletion() {
 fn test_delete_with_info() {
     // Create the test file to be deleted, ensuring that we include the current
     // directory so we can later assert that the `original_parent` is preserved.
-    let path = env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
     File::create_new(&path).unwrap();
 
     // Create a new trash context for deleting the file with info.
-    let trash = TrashContext::new();
+    let trash = trash::TrashContext::new();
 
     match trash.delete_with_info(&path) {
         Ok(trash_item) => {
@@ -221,11 +220,11 @@ fn test_delete_with_info() {
 
     // Create the test file to be deleted, ensuring that we include the current
     // directory so we can later assert that the `original_parent` is preserved.
-    let path = env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
     File::create_new(&path).unwrap();
 
     // Create a new trash context for deleting the file with info.
-    let trash = TrashContext::new();
+    let trash = trash::TrashContext::new();
 
     match trash.delete_with_info(&path) {
         Ok(trash_item) => {
