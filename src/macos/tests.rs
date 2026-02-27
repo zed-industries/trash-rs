@@ -178,6 +178,48 @@ fn test_delete_with_info_finder() {
 
 #[test]
 #[serial]
+fn test_trash_and_restore_roundtrip_finder() {
+    let mut cleanup_paths = CleanupPaths::new();
+    let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    cleanup_paths.push(path.clone());
+    std::fs::write(&path, "Hello!").expect("Should be able to write to file");
+
+    let mut trash = TrashContext::new();
+    trash.set_delete_method(DeleteMethod::Finder);
+
+    let trash_item = trash.delete_with_info(&path).expect("Should be able to delete the file");
+    assert!(!path.exists());
+
+    restore_all(vec![trash_item]).expect("Should successfully restore the trash item");
+
+    let file_contents = std::fs::read_to_string(&path).expect("Should be able to read file contents");
+    assert!(path.exists());
+    assert_eq!(file_contents, "Hello!");
+}
+
+#[test]
+#[serial]
+fn test_trash_and_restore_roundtrip_ns_file_manager() {
+    let mut cleanup_paths = CleanupPaths::new();
+    let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    cleanup_paths.push(path.clone());
+    std::fs::write(&path, "Hello!").expect("Should be able to write to file");
+
+    let mut trash = TrashContext::new();
+    trash.set_delete_method(DeleteMethod::NsFileManager);
+
+    let trash_item = trash.delete_with_info(&path).expect("Should be able to delete the file");
+    assert!(!path.exists());
+
+    restore_all(vec![trash_item]).expect("Should successfully restore the trash item");
+
+    let file_contents = std::fs::read_to_string(&path).expect("Should be able to read file contents");
+    assert!(path.exists());
+    assert_eq!(file_contents, "Hello!");
+}
+
+#[test]
+#[serial]
 fn test_restore_all_restore_collision_file_manager() {
     let mut cleanup_paths = CleanupPaths::new();
     let path = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
@@ -247,7 +289,29 @@ fn test_restore_all_missing_trash_item() {
     let time_deleted = 0;
     let trash_item = TrashItem { id: id.clone().into(), name, original_parent, time_deleted };
 
-    let err = restore_all(vec![trash_item]).expect_err("Should fail to restore non-existing file");
-    let description = format!("Trash item not found at {:?}", id);
-    assert!(matches!(err, Error::Unknown { description: d } if d == description))
+    match restore_all(vec![trash_item]) {
+        Err(Error::Unknown { description }) => assert_eq!(description, format!("Trash item not found at {:?}", id)),
+        _ => panic!("Should fail to restore non-existing file"),
+    }
+}
+
+#[test]
+fn test_restore_all_twins() {
+    let id = std::env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    let name: OsString = id.file_name().expect("Should be able to get the file name").into();
+    let original_parent = id.parent().expect("Should be able to get parent").to_path_buf();
+    let time_deleted = 0;
+
+    let trash_items = vec![
+        TrashItem { id: id.clone().into(), name: name.clone(), original_parent: original_parent.clone(), time_deleted },
+        TrashItem { id: id.clone().into(), name, original_parent, time_deleted },
+    ];
+
+    match restore_all(trash_items.clone()) {
+        Err(Error::RestoreTwins { path, items }) => {
+            assert_eq!(path, id);
+            assert_eq!(items, trash_items);
+        }
+        _ => panic!("Should return Error::RestoreTwins"),
+    }
 }
