@@ -473,7 +473,10 @@ pub mod os_limited {
     //! This module provides functionality which is only supported on Windows and
     //! Linux or other Freedesktop Trash compliant environment.
 
-    use std::{borrow::Borrow, collections::HashSet};
+    use std::borrow::Borrow;
+
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android")))]
+    use std::collections::HashSet;
 
     use super::{platform, Error, TrashItem, TrashItemMetadata};
 
