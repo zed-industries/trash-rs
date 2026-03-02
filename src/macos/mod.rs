@@ -27,7 +27,6 @@ pub enum DeleteMethod {
     /// - Produces the sound that Finder usually makes when deleting a file
     /// - Shows the "Put Back" option in the context menu, when using the Finder application
     ///
-    /// This is the default.
     Finder,
 
     /// Use `trashItemAtURL` from the `NSFileManager` object to delete the files.
@@ -40,12 +39,14 @@ pub enum DeleteMethod {
     ///   at:
     ///   - <https://github.com/sindresorhus/macos-trash/issues/4>
     ///   - <https://github.com/ArturKovacs/trash-rs/issues/14>
+    ///
+    /// This is the default.
     NsFileManager,
 }
 impl DeleteMethod {
-    /// Returns `DeleteMethod::Finder`
+    /// Returns `DeleteMethod::NsFileManager`
     pub const fn new() -> Self {
-        DeleteMethod::Finder
+        DeleteMethod::NsFileManager
     }
 }
 impl Default for DeleteMethod {
