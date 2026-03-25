@@ -50,8 +50,11 @@ impl TrashContext {
 
             pfo.SetOperationFlags(FOF_NO_UI | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING)?;
 
-            // Set up progress sink to collect trash item IDs if requested
-            // We need to keep sink_interface alive until after PerformOperations completes
+            // The `PostDeleteItem` callback provides the item's ID immediately,
+            // but the full shell metadata (original location, delete time) may
+            // not yet be written to the Recycle Bin at that point.
+            // We collect IDs during the operation and do a full metadata lookup
+            // only after `PerformOperations` completes.
             let (ids_arc, _sink_interface) = if with_info {
                 let sink = TrashProgressSink::new();
                 let ids_arc = sink.ids.clone();
