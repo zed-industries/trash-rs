@@ -6,6 +6,9 @@ use log::trace;
 use serial_test::serial;
 use trash::{delete, delete_all};
 
+use std::env;
+use trash::TrashContext;
+
 mod util {
     use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -176,4 +179,68 @@ fn recursive_file_with_content_deletion() {
 
     trash::delete(parent_dir).unwrap();
     assert!(!parent_dir.exists());
+}
+
+#[test]
+#[serial]
+#[cfg(target_os = "linux")]
+fn test_delete_with_info() {
+    // Create the test file to be deleted, ensuring that we include the current
+    // directory so we can later assert that the `original_parent` is preserved.
+    let path = env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    File::create_new(&path).unwrap();
+
+    // Create a new trash context for deleting the file with info.
+    let trash = TrashContext::new();
+
+    match trash.delete_with_info(&path) {
+        Ok(trash_item) => {
+            // Before asserting any of the fields, we'll go ahead and remove the
+            // trashed file from the Freedesktop trash, otherwise it'll be kept
+            // around after the test is finished.
+            // On Freedesktop, `id` points to the `.trashinfo` file. The actual
+            // trashed file lives in the sibling `files/` directory, so we need
+            // to clean up both.
+            let info_path = PathBuf::from(&trash_item.id);
+            let _ = std::fs::remove_file(&info_path);
+            if let Some(info_dir) = info_path.parent().and_then(|p| p.parent()) {
+                let file_in_trash = info_dir.join("files").join(info_path.file_stem().unwrap_or_default());
+                let _ = std::fs::remove_file(&file_in_trash).or_else(|_| std::fs::remove_dir_all(&file_in_trash));
+            }
+
+            assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
+            assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent").as_os_str());
+        }
+        _ => panic!("Calling delete_with_info failed to return TrashItem."),
+    }
+}
+
+#[test]
+#[serial]
+#[cfg(target_os = "windows")]
+fn test_delete_with_info() {
+    use trash::os_limited::purge_all;
+
+    // Create the test file to be deleted, ensuring that we include the current
+    // directory so we can later assert that the `original_parent` is preserved.
+    let path = env::current_dir().expect("Should be able to get current directory").join(get_unique_name());
+    File::create_new(&path).unwrap();
+
+    // Create a new trash context for deleting the file with info.
+    let trash = TrashContext::new();
+
+    match trash.delete_with_info(&path) {
+        Ok(trash_item) => {
+            // Before asserting any of the fields, we'll go ahead and remove the
+            // trashed file from the Recycle Bin, otherwise it'll be kept around
+            // after the test is finished.
+            // The returned `Result` is ignored, as we don't want the test to
+            // fail in case we're not able to remove the file from trash.
+            let _ = purge_all([&trash_item]);
+
+            assert_eq!(trash_item.name, path.components().last().expect("Should have last component").as_os_str());
+            assert_eq!(trash_item.original_parent, path.parent().expect("Should have parent"));
+        }
+        _ => panic!("Calling delete_with_info failed to return TrashItem."),
+    }
 }

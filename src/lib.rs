@@ -109,7 +109,32 @@ impl TrashContext {
         trace!("Starting canonicalize_paths");
         let full_paths = canonicalize_paths(paths)?;
         trace!("Finished canonicalize_paths");
-        self.delete_all_canonicalized(full_paths)
+
+        self.delete_all_canonicalized(full_paths, false).map(|_| ())
+    }
+
+    /// Same as `delete`, but returns a `TrashItem` describing where the file
+    /// ended up in trash.
+    pub fn delete_with_info<T: AsRef<Path>>(&self, path: T) -> Result<TrashItem, Error> {
+        self.delete_all_with_info(&[path])?
+            .pop()
+            .ok_or(Error::Unknown { description: "delete_with_info did not return trash item information".into() })
+    }
+
+    /// Same as `delete_all` but returns `TrashItem`s describing where files
+    /// ended up in the trash.
+    pub fn delete_all_with_info<I, T>(&self, paths: I) -> Result<Vec<TrashItem>, Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: AsRef<Path>,
+    {
+        let full_paths = canonicalize_paths(paths)?;
+
+        self.delete_all_canonicalized(full_paths, true).and_then(|items| {
+            items.ok_or(Error::Unknown {
+                description: "delete_all_with_info did not return trash item information".into(),
+            })
+        })
     }
 }
 
@@ -118,6 +143,13 @@ impl TrashContext {
 /// See: [`TrashContext::delete`](TrashContext::delete)
 pub fn delete<T: AsRef<Path>>(path: T) -> Result<(), Error> {
     DEFAULT_TRASH_CTX.delete(path)
+}
+
+/// Convenience method for `DEFAULT_TRASH_CTX.delete_with_info()`.
+///
+/// See: [`TrashContext::delete_with_info`](TrashContext::delete_with_info)
+pub fn delete_with_info<T: AsRef<Path>>(path: T) -> Result<TrashItem, Error> {
+    DEFAULT_TRASH_CTX.delete_with_info(path)
 }
 
 /// Convenience method for `DEFAULT_TRASH_CTX.delete_all()`.
@@ -129,6 +161,17 @@ where
     T: AsRef<Path>,
 {
     DEFAULT_TRASH_CTX.delete_all(paths)
+}
+
+/// Convenience method for `DEFAULT_TRASH_CTX.delete_all_with_info()`.
+///
+/// See: [`TrashContext::delete_all_with_info`](TrashContext::delete_all_with_info)
+pub fn delete_all_with_info<I, T>(paths: I) -> Result<Vec<TrashItem>, Error>
+where
+    I: IntoIterator<Item = T>,
+    T: AsRef<Path>,
+{
+    DEFAULT_TRASH_CTX.delete_all_with_info(paths)
 }
 
 /// Provides information about an error.
