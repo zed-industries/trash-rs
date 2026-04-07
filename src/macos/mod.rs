@@ -8,7 +8,7 @@ use std::{
 use log::trace;
 use objc2_foundation::{NSFileManager, NSString, NSURL};
 
-use crate::{into_unknown, Error, TrashContext, TrashItem};
+use crate::{fs_error, into_unknown, Error, TrashContext, TrashItem};
 
 #[derive(Copy, Clone, Debug)]
 /// There are 2 ways to trash files: via the ≝Finder app or via the OS NsFileManager call
@@ -285,6 +285,40 @@ fn esc_quote(s: &str) -> Cow<'_, str> {
     } else {
         Cow::Borrowed(s)
     }
+}
+
+/// Does a basic restore using file renaming, ignoring whether the
+/// `DeleteMethod::NSFileManager` or `DeleteMethod::Finder` was used when
+/// deleting the file, which means that files deleted with
+/// `DeleteMethod::Finder` will not correctly update the `.DS_Store` file that
+/// is kept in macOS' trash.
+pub fn restore_all<I>(items: I) -> Result<(), Error>
+where
+    I: IntoIterator<Item = TrashItem>,
+{
+    let mut iter = items.into_iter();
+    while let Some(item) = iter.next() {
+        let original_path = item.original_path();
+        let trash_path = Path::new(&item.id);
+
+        // Ensure that both the trash item still exists, as well as that the
+        // there's no collision on the original path before proceeding.
+        if !std::fs::exists(&item.id).map_err(into_unknown)? {
+            return Err(Error::Unknown { description: format!("Trash item not found at {:?}", item.id) });
+        }
+
+        if std::fs::exists(&original_path).map_err(|error| fs_error(&original_path, error))? {
+            return Err(Error::RestoreCollision {
+                path: original_path,
+                remaining_items: std::iter::once(item).chain(iter).collect::<Vec<_>>(),
+            });
+        }
+
+        std::fs::create_dir_all(&item.original_parent).map_err(|error| fs_error(&original_path, error))?;
+        std::fs::rename(trash_path, &original_path).map_err(|error| fs_error(&original_path, error))?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
