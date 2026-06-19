@@ -1,11 +1,11 @@
 use crate::{Error, TrashContext, TrashItem, TrashItemMetadata, TrashItemSize};
-use log::warn;
 use std::{
     borrow::Borrow,
     ffi::{c_void, OsStr, OsString},
     os::windows::{ffi::OsStrExt, prelude::*},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::SystemTime,
 };
 use windows::Win32::{
     Foundation::*, Storage::EnhancedStorage::*, System::Com::*, System::SystemServices::*,
@@ -96,11 +96,17 @@ impl TrashContext {
                     .map_err(|e| Error::Unknown { description: format!("Failed to lock trash item ids: {}", e) })?;
 
                 let mut items = Vec::with_capacity(ids.len());
-                for id in ids.iter() {
-                    match get_trash_item_by_id(id) {
-                        Ok(item) => items.push(item),
-                        Err(err) => warn!("Failed to look up trash item metadata for {:?}: {}", id, err),
-                    }
+                for (id, source_path) in ids.iter() {
+                    let item = get_trash_item_by_id(id).unwrap_or_else(|_| TrashItem {
+                        id: id.clone(),
+                        name: source_path.file_name().unwrap_or_default().to_os_string(),
+                        original_parent: source_path.parent().unwrap_or(Path::new("")).to_path_buf(),
+                        time_deleted: SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0),
+                    });
+                    items.push(item);
                 }
                 Ok(Some(items))
             } else {
@@ -327,8 +333,7 @@ unsafe fn get_trash_item_by_id(id: &OsStr) -> Result<TrashItem, Error> {
 /// look up the full metadata using these IDs.
 #[implement(IFileOperationProgressSink)]
 pub(crate) struct TrashProgressSink {
-    /// Collected IDs (parsing names) of items moved to the recycle bin
-    pub ids: Arc<Mutex<Vec<OsString>>>,
+    pub ids: Arc<Mutex<Vec<(OsString, PathBuf)>>>,
 }
 
 impl TrashProgressSink {
@@ -417,21 +422,23 @@ impl IFileOperationProgressSink_Impl for TrashProgressSink {
     fn PostDeleteItem(
         &self,
         _dwflags: u32,
-        _psiitem: Option<&IShellItem>,
+        psiitem: Option<&IShellItem>,
         hrdelete: windows::core::HRESULT,
         psinewlycreated: Option<&IShellItem>,
     ) -> windows::core::Result<()> {
-        // Only process if the delete succeeded and we have a new item in the trash
         // HRESULT success codes have the high bit clear (SUCCEEDED macro check)
         // hrdelete.is_ok() only checks for S_OK (0), but other success codes exist
         let succeeded = hrdelete.0 >= 0;
         if succeeded {
             if let Some(trash_item) = psinewlycreated {
-                // Just collect the ID (parsing name) - we'll look up full metadata later
                 unsafe {
                     if let Ok(id) = get_display_name(trash_item, SIGDN_DESKTOPABSOLUTEPARSING) {
+                        let source_path = psiitem
+                            .and_then(|s| get_display_name(s, SIGDN_FILESYSPATH).ok())
+                            .map(PathBuf::from)
+                            .unwrap_or_default();
                         if let Ok(mut ids) = self.ids.lock() {
-                            ids.push(id);
+                            ids.push((id, source_path));
                         }
                     }
                 }
