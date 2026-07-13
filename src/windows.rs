@@ -4,8 +4,9 @@ use std::{
     borrow::Borrow,
     ffi::{c_void, OsStr, OsString},
     os::windows::{ffi::OsStrExt, prelude::*},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::SystemTime,
 };
 use windows::Win32::{
     Foundation::*, Storage::EnhancedStorage::*, System::Com::*, System::SystemServices::*,
@@ -50,17 +51,20 @@ impl TrashContext {
 
             pfo.SetOperationFlags(FOF_NO_UI | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING)?;
 
-            // The `PostDeleteItem` callback provides the item's ID immediately,
-            // but the full shell metadata (original location, delete time) may
-            // not yet be written to the Recycle Bin at that point.
-            // We collect IDs during the operation and do a full metadata lookup
-            // only after `PerformOperations` completes.
-            let (ids_arc, _sink_interface) = if with_info {
+            // When info is requested, a progress sink records each item's
+            // recycle-bin ID and source path during the operation, and the
+            // `TrashItem`s are built from that data alone.
+            // Rebinding the recycled item by its parsing name after
+            // `PerformOperations` to read the shell's metadata is racy as the
+            // lookup can fail with `ERROR_NOT_FOUND` even though the item was
+            // trashed successfully, and everything except the ID is already
+            // known from the source path anyway.
+            let (trashed_items, _sink_interface) = if with_info {
                 let sink = TrashProgressSink::new();
-                let ids_arc = sink.ids.clone();
+                let trashed_items = sink.trashed_items.clone();
                 let sink_interface: IFileOperationProgressSink = sink.into();
                 pfo.Advise(&sink_interface)?;
-                (Some(ids_arc), Some(sink_interface))
+                (Some(trashed_items), Some(sink_interface))
             } else {
                 (None, None)
             };
@@ -89,19 +93,26 @@ impl TrashContext {
                 return Err(Error::Unknown { description: "Some operations were aborted".into() });
             }
 
-            // Look up full TrashItem metadata for collected IDs
-            if let Some(ids_arc) = ids_arc {
-                let ids = ids_arc
+            if let Some(trashed_items) = trashed_items {
+                // The deletion time is approximated instead of read back from
+                // the shell's `System.Recycle.DateDeleted` property, which is
+                // subject to the same post-operation race described above.
+                let time_deleted = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|duration| duration.as_secs() as i64)
+                    .unwrap_or(0);
+                let items = trashed_items
                     .lock()
-                    .map_err(|e| Error::Unknown { description: format!("Failed to lock trash item ids: {}", e) })?;
+                    .map_err(|e| Error::Unknown { description: format!("Failed to lock trashed items: {}", e) })?
+                    .iter()
+                    .map(|(id, source_path)| TrashItem {
+                        id: id.clone(),
+                        name: source_path.file_name().unwrap_or_default().to_os_string(),
+                        original_parent: source_path.parent().unwrap_or(Path::new("")).to_path_buf(),
+                        time_deleted,
+                    })
+                    .collect::<Vec<_>>();
 
-                let mut items = Vec::with_capacity(ids.len());
-                for id in ids.iter() {
-                    match get_trash_item_by_id(id) {
-                        Ok(item) => items.push(item),
-                        Err(err) => warn!("Failed to look up trash item metadata for {:?}: {}", id, err),
-                    }
-                }
                 Ok(Some(items))
             } else {
                 Ok(None)
@@ -302,38 +313,22 @@ unsafe fn get_date_deleted_unix(item: &IShellItem2) -> Result<i64, Error> {
     Ok(seconds_since_unix_epoch as i64)
 }
 
-/// Look up a TrashItem by its ID (parsing name) from the recycle bin
-unsafe fn get_trash_item_by_id(id: &OsStr) -> Result<TrashItem, Error> {
-    let id_as_wide = to_wide_path(id);
-    let parsing_name = PCWSTR(id_as_wide.as_ptr());
-    let item: IShellItem = SHCreateItemFromParsingName(parsing_name, None)?;
-    let item2: IShellItem2 = item.cast()?;
-
-    let name = get_display_name(&item, SIGDN_PARENTRELATIVE)?;
-    let original_location_variant = item2.GetProperty(&SCID_ORIGINAL_LOCATION)?;
-    let original_location_bstr = PropVariantToBSTR(&original_location_variant)?;
-    let original_location = OsString::from_wide(original_location_bstr.as_wide());
-    let time_deleted = get_date_deleted_unix(&item2)?;
-
-    Ok(TrashItem { id: id.to_os_string(), name, original_parent: PathBuf::from(original_location), time_deleted })
-}
-
-/// A COM object implementing IFileOperationProgressSink to collect trash item IDs
-/// during delete operations. The PostDeleteItem callback receives the newly created
-/// item in the Recycle Bin, and we collect its ID (parsing name) for later lookup.
-///
-/// We only collect IDs here because the full metadata (original location, delete time)
-/// may not be available immediately in the callback. After operations complete, we
-/// look up the full metadata using these IDs.
+/// A COM object implementing `IFileOperationProgressSink` to observe delete
+/// operations.
+/// For every item that reaches the recycle bin, `PostDeleteItem` records the
+/// recycle-bin ID of the newly created item along with the item's original
+/// filesystem path, from which `TrashItem`s are built once the operation
+/// completes.
 #[implement(IFileOperationProgressSink)]
 pub(crate) struct TrashProgressSink {
-    /// Collected IDs (parsing names) of items moved to the recycle bin
-    pub ids: Arc<Mutex<Vec<OsString>>>,
+    /// The `(recycle-bin ID, source path)` of each item moved to the recycle
+    /// bin.
+    pub trashed_items: Arc<Mutex<Vec<(OsString, PathBuf)>>>,
 }
 
 impl TrashProgressSink {
     pub fn new() -> Self {
-        Self { ids: Arc::new(Mutex::new(Vec::new())) }
+        Self { trashed_items: Arc::new(Mutex::new(Vec::new())) }
     }
 }
 
@@ -417,21 +412,32 @@ impl IFileOperationProgressSink_Impl for TrashProgressSink {
     fn PostDeleteItem(
         &self,
         _dwflags: u32,
-        _psiitem: Option<&IShellItem>,
+        psiitem: Option<&IShellItem>,
         hrdelete: windows::core::HRESULT,
         psinewlycreated: Option<&IShellItem>,
     ) -> windows::core::Result<()> {
-        // Only process if the delete succeeded and we have a new item in the trash
         // HRESULT success codes have the high bit clear (SUCCEEDED macro check)
         // hrdelete.is_ok() only checks for S_OK (0), but other success codes exist
         let succeeded = hrdelete.0 >= 0;
         if succeeded {
             if let Some(trash_item) = psinewlycreated {
-                // Just collect the ID (parsing name) - we'll look up full metadata later
                 unsafe {
                     if let Ok(id) = get_display_name(trash_item, SIGDN_DESKTOPABSOLUTEPARSING) {
-                        if let Ok(mut ids) = self.ids.lock() {
-                            ids.push(id);
+                        // Items are only ever deleted by their canonicalized
+                        // filesystem path, so a missing source path here is
+                        // unexpected, and the resulting `TrashItem` would have
+                        // an empty name and original parent.
+                        let source_path = psiitem
+                            .and_then(|s| get_display_name(s, SIGDN_FILESYSPATH).ok())
+                            .map(PathBuf::from)
+                            .unwrap_or_else(|| {
+                                warn!("Failed to determine the source path of the trashed item {:?}", id);
+                                PathBuf::new()
+                            });
+
+                        match self.trashed_items.lock() {
+                            Ok(mut trashed_items) => trashed_items.push((id, source_path)),
+                            Err(err) => warn!("Failed to lock trashed items: {}", err),
                         }
                     }
                 }
