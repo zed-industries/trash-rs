@@ -384,7 +384,9 @@ where
         // that either there's a bug in this code or the target system didn't follow
         // the specification.
         let file = restorable_file_in_trash_from_info_file(info_file);
-        assert!(virtually_exists(&file).map_err(|e| fs_error(&file, e))?);
+        if !virtually_exists(&file).map_err(|e| fs_error(&file, e))? {
+            return Err(Error::NoLongerInTrash);
+        }
         // TODO add option to forcefully replace any target at the restore location
         // if it already exists.
         let original_path = item.original_path();

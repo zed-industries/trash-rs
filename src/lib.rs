@@ -193,6 +193,10 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// The file got removed from trash. Either the trash was emptied or this
+    /// specific file was removed.
+    NoLongerInTrash,
+
     /// One of the target items was a root folder.
     /// If a list of items are requested to be removed by a single function call (e.g. `delete_all`)
     /// and this error is returned, then it's guaranteed that none of the items is removed.
